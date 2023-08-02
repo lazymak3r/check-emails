@@ -1,5 +1,6 @@
 const fs = require('fs');
 const axios = require('axios');
+const SendXRestApi = require('send_x_rest_api');
 
 const apiKey = 'kXeRIoS7mA36dEyFWsuQMKgaUb0nP4Vf';
 
@@ -50,12 +51,35 @@ async function getStartFrom() {
         reject(error)
       })
       .on("close", (error) => {
-        const lastChunkArr = data.trim().split('\n');
-        const index = lastChunkArr[lastChunkArr.length - 1][0]
+        const lastChunkArr = data.trim().split(/\s+/);
+        const index = lastChunkArr[lastChunkArr.length - 1].split(',')[0]
+        if (!index) {
+          resolve(0)
+        }
         const start = +index + 1;
         resolve(isNaN(start) ? 0 : start);
       });
   })
+}
+
+async function addToSendX(subscriberInfo) {
+  return new Promise((resolve, reject) => {
+    const SendXApi = new SendXRestApi.ContactApi();
+    const apiKey = 'uBT1o35UbbRxTKjqeero';
+    const teamId = 'a0Bqgfe5hcoiQ4vVPCK1sA';
+
+    const subscriberInformation = {
+      email: subscriberInfo.email,
+      firstName: subscriberInfo.firstName,
+      lastName: subscriberInfo.lastName,
+      tags: subscriberInfo.tags,
+    };
+
+    SendXApi.contactIdentifyPost(apiKey, teamId, subscriberInformation, (error, data) => {
+      if (error) reject(error);
+      else resolve(data);
+    });
+  });
 }
 
 async function runApp() {
@@ -70,7 +94,7 @@ async function runApp() {
   for (let index = startFrom; index < records.length; index++) {
     if (+index === 0) {
       await appWriteFile('result.csv', '')
-      await appAppendFile(`result.csv`, `Index,First Name;Last Name;Email;Country;Status\n`)
+      await appAppendFile(`result.csv`, `Index,First Name,Last Name,Email,Country,Status\n`)
       await appWriteFile('errors.csv', '')
       await appAppendFile(`errors.csv`, `First Name,Last Name,Email,Country,Reason\n`)
       continue;
@@ -88,6 +112,21 @@ async function runApp() {
       result.push(json.status)
 
       console.log(`[${+index}/${records.length - 1}] [${result.join(', ')}]`);
+
+      if (['unknown', 'passed'].includes(json.status)) {
+        try {
+          console.log('Adding to SendX...')
+          await addToSendX({
+            email, firstName, lastName, tags: ['Procoin'],
+          })
+          console.log(`[Added To SendX] [Email: ${email}]`)
+        } catch (e) {
+          let errorRow = [firstName.trim(), lastName.trim(), email.trim(), country.trim(), e.message];
+          await appAppendFile(`errors.csv`, `${errorRow.join(',')}\n`)
+          console.error(`Error while processing email: ${email}`, e.message);
+        }
+      }
+
       await appAppendFile(`result.csv`, `${result.join(',')}\n`)
     } catch (error) {
       let errorRow = [firstName.trim(), lastName.trim(), email.trim(), country.trim(), error.message];
